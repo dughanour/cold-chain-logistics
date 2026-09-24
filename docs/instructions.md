@@ -25,6 +25,9 @@ docker run -v mssql_data:/var/opt/mssql \
   -d mcr.microsoft.com/mssql/server:2022-latest
 ```
 
-- install the req > uv pip install -r requirements.txt
-- 
+- Install the req > uv pip install -r requirements.txt
+- python scripts\ingest_legacy_data.py
+- Test : docker exec legacy-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "FdeEnterprisePass123!" -C -Q "SELECT TOP 5 * FROM dbo.TBL_SC_FLEET_HIST_RAW;"
+
+
 

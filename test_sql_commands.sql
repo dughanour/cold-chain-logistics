@@ -1,0 +1,2 @@
+SELECT COUNT(*) AS total_raws
+FROM   dbo.TBL_SC_FLEET_HIST_RAW;
