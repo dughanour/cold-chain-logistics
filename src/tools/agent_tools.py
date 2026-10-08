@@ -1,23 +1,53 @@
 import os
+import sys
 import urllib
 import requests
 from pathlib import Path
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
-from langchain_core.tools import tool
-from langchain_openai import OpenAIEmbeddings
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_pinecone import PineconeVectorStore
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # ==========================================
 # 1. PATH SETUP
 # ==========================================
 script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent.parent
+
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from dotenv import load_dotenv
 load_dotenv(project_root / ".env")
 
+from sqlalchemy import create_engine, text
+from langchain_core.tools import tool
+from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_pinecone import PineconeVectorStore
+
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+
+
+def get_cached_huggingface_embeddings(model_name: str):
+    """
+    Loads and locks the HuggingFace model weights into the machine's global RAM.
+    If called again during any subsequent script rerun, it returns instantly.
+    """
+    import streamlit as st
+    
+    # We wrap the inner call with st.cache_resource dynamically 
+    @st.cache_resource(show_spinner=False)
+    def _load_model(name: str):
+        print(f"🧠 MEMORY SEED: Permanently caching local model [{name}] in global RAM...")
+        from langchain_huggingface import HuggingFaceEmbeddings
+        return HuggingFaceEmbeddings(
+            model_name=name,
+            model_kwargs={'device': 'cpu'}
+        )
+    return _load_model(model_name)
+
 EMBEDDINGS_MODEL_SETTING = os.getenv("Embeddings_model", "Local").strip().upper()
 
 db_host = os.getenv("SQL_SERVER_HOST", "localhost")
@@ -36,10 +66,18 @@ else:
     # Read the explicit model identifier casing string from the .env parameters
     local_model_target = os.getenv("Local_Embedding_Model", "BAAI/bge-m3").strip()
     print(f"🤗 Mode: Local Fallback Settings Activated. Launching [{local_model_target}] (1024 Dim)...")
-    embeddings = HuggingFaceEmbeddings(
-        model_name=local_model_target,   # Passes parameter dynamically
-        model_kwargs={'device': 'cpu'}
-    )
+
+    try:
+        import streamlit as st
+        if st.runtime.exists():
+            embeddings = get_cached_huggingface_embeddings(local_model_target)
+        else:
+            from langchain_huggingface import HuggingFaceEmbeddings
+            embeddings = HuggingFaceEmbeddings(model_name=local_model_target, model_kwargs={'device': 'cpu'})
+    except ImportError:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        embeddings = HuggingFaceEmbeddings(model_name=local_model_target, model_kwargs={'device': 'cpu'})
+
     INDEX_NAME = "fde-sop-index-local" 
 
 

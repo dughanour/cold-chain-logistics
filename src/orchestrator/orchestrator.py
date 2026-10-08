@@ -1,8 +1,19 @@
-from torchgen.api.cpp import return_type
 import os
 import sys
 from pathlib import Path
+
+# ==========================================
+# 1. SETUP & PATH RESOLUTION
+# ==========================================
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parents[1]  # climbs to project root
+
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from dotenv import load_dotenv
+load_dotenv(project_root / ".env")
+
 from typing import Annotated, TypedDict
 from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -11,17 +22,18 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from src.tools.agent_tools import query_telemetry_db, fetch_corridor_conditions, search_compliance_sop
 from langchain_openai import ChatOpenAI
-from langchain_community.chat_models import ChatOllama
+try:
+    from langchain_groq import ChatGroq
+except ImportError:
+    ChatGroq = None
 
-
-
-# ==========================================
-# 1. SETUP & PATH RESOLUTION
-# ==========================================
-script_dir = Path(__file__).resolve().parent
-project_root = script_dir.parents[0]
-
-load_dotenv(project_root / ".env")
+try:
+    from langchain_ollama import ChatOllama
+except ImportError:
+    try:
+        from langchain_community.chat_models import ChatOllama
+    except ImportError:
+        from langchain_community.llms import Ollama as ChatOllama
 
 # ==========================================
 # 2. STATE STRUCTURE
@@ -57,6 +69,17 @@ elif AGENT_LLM_SETTING == "DEEPSEEK":
         # }
     )
 
+elif AGENT_LLM_SETTING == "GROQ":
+    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+    print(f"⚡ Brain Mode: Utilizing Ultra-Fast Groq Cloud Reasoner ({groq_model})...")
+    if ChatGroq is None:
+        from langchain_groq import ChatGroq
+    llm = ChatGroq(
+        model=groq_model,
+        temperature=0,
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+    )
+
 else:  # FALLBACK / DEFAULT RUNNER MODE
     print("🤗 Brain Mode: Local Fallback Activated. Binding Local Ollama (qwen2.5:7b)...")
     llm = ChatOllama(model="qwen2.5:7b", temperature=0, num_predict=1024)
@@ -83,7 +106,7 @@ graph_builder.add_node("reasoner", reasoning_node)
 graph_builder.add_node("tools", ToolNode(fde_tools))
 graph_builder.add_edge(START, "reasoner")
 graph_builder.add_conditional_edges("reasoner", tools_condition)
-graph_builder.edges("tools", "reasoner")
+graph_builder.add_edge("tools", "reasoner")
 
 checkpointer = MemorySaver()
 workflow = graph_builder.compile(checkpointer=checkpointer)
